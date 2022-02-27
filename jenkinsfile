@@ -1,0 +1,75 @@
+pipeline {
+    agent any
+
+    options {
+        ansiColor('xterm')
+    }
+
+    stages {
+        stage('AWS list') {
+            steps {
+                sh '''
+                    aws configure list
+                '''            
+            }
+        }
+        stage('Checkout repository') {
+            steps {
+                checkout scm
+            }
+        }
+        stage('Runs <terraform get>') {
+            steps {
+                sh '''
+                    terraform get -update=true
+                   '''
+              }
+            }
+        stage('Runs <terraform init>') {
+            steps {
+                sh '''
+                    terraform init -backend=true -input=false -backend-config=./backend/backend-${ENV}.tfvars
+                   '''
+            }
+        }
+        stage('Runs testing plan') {
+            steps {
+                sh '''
+                    ls ./tfvars/
+                   '''
+            }
+        }
+        stage('Runs <terraform plan>') {
+            steps {
+                script {
+                    def plan = 'terraform plan -out=tfplan -input=false -var-file="./tfvars/poc-${ENV}.tfvars" '
+                    if ("$TF_DESTROY" == "true") {
+                        plan = plan + ' -destroy'
+                    }
+                    plan = plan + ' '
+
+                    def planExitCode = sh(script: plan, returnStatus: true)
+
+                    if (planExitCode == 1) {
+                        error 'Error executing Terraform plan.'
+                    }
+                }
+            }
+        }
+        stage('Asks approval for <terraform apply>') {
+            steps {
+                script {
+                    def userInput = input(id: 'confirm', message: 'Apply Terraform?', parameters: [ [$class: 'BooleanParameterDefinition', defaultValue: false, description: 'Apply terraform', name: 'confirm'] ])
+                }
+            }
+        }
+        stage('Runs <terraform apply>') {
+            steps {
+                sh '''
+                    terraform apply -lock=false -input=false tfplan
+                    '''
+
+            }
+        }
+    }
+}
